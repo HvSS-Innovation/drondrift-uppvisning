@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Lokalt / hemligheter
+.env
+.env.*
+secrets/
+keys/
+*.pem
+*.key
+
+# Build/cache (om något ev. tillkommer senare)
+dist/
+build/
+node_modules/
+
+# Lokala scratch-filer
+_scratch/
