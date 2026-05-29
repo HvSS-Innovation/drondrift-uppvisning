@@ -246,6 +246,24 @@
   .disclaimer { font-size:0.66rem; color:var(--text-muted); text-align:center; margin-top:8px; padding:0 8px; line-height:1.55; opacity:0.85; }
   .disclaimer a { color:var(--accent); }
 
+  /* Music-toggle — flytande, top-right, alltid synlig */
+  .music-toggle {
+    position:fixed; top:54px; right:12px;
+    width:38px; height:38px;
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:50%; color:var(--text-secondary);
+    cursor:pointer; z-index:50;
+    display:flex; align-items:center; justify-content:center;
+    -webkit-tap-highlight-color:transparent;
+    transition:color 0.15s, border-color 0.15s, background 0.15s;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  }
+  .music-toggle:hover { color:var(--accent); border-color:var(--accent); background:var(--bg-secondary); }
+  .music-toggle svg { width:18px; height:18px; }
+  .music-toggle .icon-off { display:none; }
+  .music-toggle.is-muted .icon-on { display:none; }
+  .music-toggle.is-muted .icon-off { display:block; }
+
   @media print {
     body { background:#fff; color:#000; }
     .ext-banner, .modal-overlay, .actions, .compass-wrap, .toast, .live-block, details.info > summary::before { display:none; }
@@ -535,6 +553,18 @@
     Säkerhetsrapporter: <a href="mailto:nijoda@gmail.com">nijoda@gmail.com</a>.
   </p>
 </div>
+
+<!-- Intro-musik: spelas en gång efter första user gesture, fade ut efter 15 s -->
+<audio id="introAudio" preload="auto" src="audio/parade-first-light.mp3"></audio>
+<button type="button" class="music-toggle" id="musicToggle" aria-label="Musik på/av" title="Spela intro-musik igen">
+  <svg class="icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+  </svg>
+  <svg class="icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+    <line x1="3" y1="3" x2="21" y2="21" stroke-width="2.4"/>
+  </svg>
+</button>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -979,6 +1009,139 @@
     } else { fallback(); }
   }
 
+  // ── Intro-musik ──────────────────────────────────────────────────────────
+  // Spelas en gång per session efter första user gesture (autoplay-policy
+  // tillåter ljud först efter klick/tap). Fade-out efter 15 s.
+  // Toggle-knapp tillåter manuell uppspelning igen.
+  var MUSIC_KEY = 'drondrift_music_muted_v1';
+  var MUSIC_START_VOL = 0.5;
+  var MUSIC_FADE_AT_S = 15;
+  var MUSIC_FADE_DURATION_MS = 1500;
+  var introAudio = null;
+  var musicMuted = false;
+  var hasPlayedThisSession = false;
+  var fadeTimerId = null;
+  var fadeIntervalId = null;
+
+  function loadMusicPref() {
+    try { musicMuted = localStorage.getItem(MUSIC_KEY) === '1'; } catch (_) {}
+  }
+  function saveMusicPref() {
+    try { localStorage.setItem(MUSIC_KEY, musicMuted ? '1' : '0'); } catch (_) {}
+  }
+
+  function clearFade() {
+    if (fadeTimerId) { clearTimeout(fadeTimerId); fadeTimerId = null; }
+    if (fadeIntervalId) { clearInterval(fadeIntervalId); fadeIntervalId = null; }
+  }
+
+  function fadeOutAndStop() {
+    if (!introAudio) return;
+    clearFade();
+    var startVol = introAudio.volume;
+    if (startVol <= 0.01) { stopMusic(); return; }
+    var steps = 30;
+    var stepInterval = MUSIC_FADE_DURATION_MS / steps;
+    var stepSize = startVol / steps;
+    var i = 0;
+    fadeIntervalId = setInterval(function () {
+      i++;
+      var v = Math.max(0, startVol - stepSize * i);
+      try { introAudio.volume = v; } catch (_) {}
+      if (i >= steps) { stopMusic(); }
+    }, stepInterval);
+  }
+
+  function stopMusic() {
+    clearFade();
+    if (!introAudio) return;
+    try {
+      introAudio.pause();
+      introAudio.currentTime = 0;
+      introAudio.volume = MUSIC_START_VOL;
+    } catch (_) {}
+  }
+
+  function playMusic() {
+    if (!introAudio || musicMuted) return;
+    clearFade();
+    try {
+      introAudio.volume = MUSIC_START_VOL;
+      introAudio.currentTime = 0;
+    } catch (_) {}
+    var p = introAudio.play();
+    if (p && p.catch) p.catch(function () { /* gesture krävs */ });
+    fadeTimerId = setTimeout(fadeOutAndStop, MUSIC_START_VOL > 0 ? MUSIC_FADE_AT_S * 1000 : 0);
+  }
+
+  function tryAutoplay() {
+    if (musicMuted || hasPlayedThisSession) return;
+    if (!introAudio) return;
+    try { introAudio.volume = MUSIC_START_VOL; } catch (_) {}
+    var p = introAudio.play();
+    if (p && p.then) {
+      p.then(function () {
+        hasPlayedThisSession = true;
+        fadeTimerId = setTimeout(fadeOutAndStop, MUSIC_FADE_AT_S * 1000);
+      }).catch(function () {
+        // Autoplay-policy avvisade. Vänta på första gesture.
+        wireFirstGesture();
+      });
+    } else {
+      wireFirstGesture();
+    }
+  }
+
+  function wireFirstGesture() {
+    function onGesture() {
+      document.removeEventListener('click', onGesture, true);
+      document.removeEventListener('touchstart', onGesture, true);
+      document.removeEventListener('keydown', onGesture, true);
+      if (musicMuted || hasPlayedThisSession) return;
+      hasPlayedThisSession = true;
+      playMusic();
+    }
+    document.addEventListener('click', onGesture, true);
+    document.addEventListener('touchstart', onGesture, true);
+    document.addEventListener('keydown', onGesture, true);
+  }
+
+  function updateToggleUI() {
+    var btn = document.getElementById('musicToggle');
+    if (!btn) return;
+    btn.classList.toggle('is-muted', musicMuted);
+    btn.setAttribute('title', musicMuted ? 'Klicka för att spela musik' : 'Klicka för att stänga av musik');
+  }
+
+  function wireMusicToggle() {
+    var btn = document.getElementById('musicToggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      if (introAudio && !introAudio.paused) {
+        // Just nu spelas → stäng av
+        musicMuted = true;
+        stopMusic();
+      } else {
+        // Inte spelas → spela igen (klicket räknas som gesture)
+        musicMuted = false;
+        hasPlayedThisSession = true;
+        playMusic();
+      }
+      saveMusicPref();
+      updateToggleUI();
+    });
+  }
+
+  function initMusic() {
+    introAudio = document.getElementById('introAudio');
+    if (!introAudio) return;
+    loadMusicPref();
+    updateToggleUI();
+    wireMusicToggle();
+    // Försök autoplay först — om det misslyckas väntar wireFirstGesture på klick.
+    if (!musicMuted) tryAutoplay();
+  }
+
   // ── Boot ──────────────────────────────────────────────────────────────────
   function init() {
     loadState();
@@ -989,6 +1152,7 @@
     wireActions();
     wireModal();
     checkFirstVisit();
+    initMusic();
     render();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
