@@ -12,7 +12,7 @@ Sidan är tänkt för **uppvisningsläge** — civil publik närvarande, planeri
 
 ## Live URL
 
-https://hvss-innovation.github.io/drondrift-uppvisning/
+https://gitjoda71.github.io/drondrift-uppvisning/
 
 ## Funktion
 
